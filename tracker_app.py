@@ -30,6 +30,7 @@ class EmailLog(Base):
     sent_at = Column(DateTime)
     opened_at = Column(DateTime, nullable=True)
     ip = Column(String, nullable=True)
+    request_count = Column(Integer, default=0)  # Track pixel requests
 
 Base.metadata.create_all(bind=engine)
 
@@ -71,12 +72,28 @@ async def send_email(request: Request, email_request: EmailRequest):
 def track_email(tracking_id: str, request: Request):
     db = SessionLocal()
     log = db.query(EmailLog).filter(EmailLog.tracking_id == tracking_id).first()
-    if log and log.opened_at is None:
-        # Use setattr for both opened_at and ip to avoid type issues
-        setattr(log, 'opened_at', datetime.utcnow())
-        ip = getattr(request.client, 'host', '') or ''
-        setattr(log, 'ip', ip)
-        db.commit()
+    user_agent = request.headers.get("user-agent", "")
+    if log:
+        # Increment request_count
+        count = getattr(log, 'request_count', 0) or 0
+        setattr(log, 'request_count', count + 1)
+        # Gmail proxy detection
+        is_gmail_proxy = "googleusercontent.com" in user_agent or "GoogleImageProxy" in user_agent
+        current_count = getattr(log, 'request_count', 0) or 0
+        if is_gmail_proxy:
+            # Only update opened_at and ip on the second request
+            if current_count == 2 and log.opened_at is None:
+                setattr(log, 'opened_at', datetime.utcnow())
+                ip = getattr(request.client, 'host', '') or ''
+                setattr(log, 'ip', ip)
+                db.commit()
+        else:
+            # For non-Gmail, update on first open
+            if log.opened_at is None:
+                setattr(log, 'opened_at', datetime.utcnow())
+                ip = getattr(request.client, 'host', '') or ''
+                setattr(log, 'ip', ip)
+                db.commit()
     db.close()
     # 1x1 transparent PNG
     pixel = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0bIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n\x2d\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
@@ -93,6 +110,7 @@ def get_log(tracking_id: str):
             "email": log.email,
             "sent_at": log.sent_at,
             "opened_at": log.opened_at,
-            "ip": log.ip
+            "ip": log.ip,
+            "request_count": log.request_count  # Include request count in the response
         }
     return {"status": "not found"}
