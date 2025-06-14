@@ -78,7 +78,7 @@ def track_email(tracking_id: str, request: Request):
         count = getattr(log, 'request_count', 0) or 0
         setattr(log, 'request_count', count + 1)
         # Gmail proxy detection
-        is_gmail_proxy = "googleusercontent.com" in user_agent or "GoogleImageProxy" in user_agent
+        is_gmail_proxy = "gamil.com" in log.email or "googlemail.com" in log.email
         current_count = getattr(log, 'request_count', 0) or 0
         if is_gmail_proxy:
             # Only update opened_at and ip on the second request
